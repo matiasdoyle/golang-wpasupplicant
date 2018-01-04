@@ -57,6 +57,7 @@ type message struct {
 type unixgramConn struct {
 	c                      *net.UnixConn
 	fd                     uintptr
+	file                   *os.File
 	solicited, unsolicited chan message
 	wpaEvents              chan WPAEvent
 }
@@ -88,6 +89,8 @@ func Unixgram(ifName string) (Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	uc.file = file
 	uc.fd = file.Fd()
 
 	uc.solicited = make(chan message)
@@ -253,7 +256,15 @@ func (uc *unixgramConn) Close() error {
 		return err
 	}
 
-	return uc.c.Close()
+	if err := uc.file.Close(); err != nil {
+		return err
+	}
+
+	if err := uc.c.Close(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (uc *unixgramConn) Ping() error {
