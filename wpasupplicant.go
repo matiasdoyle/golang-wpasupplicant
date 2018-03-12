@@ -186,6 +186,10 @@ type Conn interface {
 	// configuration failed.
 	SetNetwork(int, string, string) error
 
+	// GetNetwork retrieves a network property. Returns error if the property
+	// retrieval failed.
+	GetNetwork(int, string) (string, error)
+
 	// EnableNetwork enables a network. Returns error if the command fails.
 	EnableNetwork(int) error
 

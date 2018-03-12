@@ -326,6 +326,16 @@ func (uc *unixgramConn) SetNetwork(networkID int, variable string, value string)
 	return uc.runCommand(cmd)
 }
 
+func (uc *unixgramConn) GetNetwork(networkID int, variable string) (string, error) {
+	resp, err := uc.cmd(fmt.Sprintf("GET_NETWORK %d %s", networkID, variable))
+	if err != nil {
+		return "ERROR", err
+	}
+	n := len(resp)
+	s := string(resp[:n])
+	return s, nil
+}
+
 func (uc *unixgramConn) SaveConfig() error {
 	return uc.runCommand("SAVE_CONFIG")
 }
