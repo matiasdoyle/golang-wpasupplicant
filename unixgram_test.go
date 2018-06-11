@@ -146,7 +146,7 @@ func TestParseStatusResults(t *testing.T) {
 
 	res, err := parseStatusResults(bytes.NewBufferString(testData))
 	if err != nil {
-		t.Errorf("Error parsing status result %t", err)
+		t.Errorf("Error parsing status result %v", err)
 	}
 
 	if res.WPAState() != "COMPLETED" {

@@ -31,6 +31,7 @@ package wpasupplicant
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -40,6 +41,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+
+	"github.com/apex/log"
 )
 
 // message is a queued response (or read error) from the wpa_supplicant
@@ -55,11 +59,12 @@ type message struct {
 //
 // See https://w1.fi/wpa_supplicant/devel/ctrl_iface_page.html.
 type unixgramConn struct {
-	c                      *net.UnixConn
-	fd                     uintptr
-	file                   *os.File
-	solicited, unsolicited chan message
-	wpaEvents              chan WPAEvent
+	c                                       *net.UnixConn
+	fd                                      uintptr
+	file                                    *os.File
+	solicited, unsolicited                  chan message
+	wpaEvents                               chan WPAEvent
+	unsolicitedCloseChan, readLoopCloseChan chan bool
 }
 
 // socketPath is where to find the the AF_UNIX sockets for each interface.  It
@@ -96,6 +101,8 @@ func Unixgram(ifName string) (Conn, error) {
 	uc.solicited = make(chan message)
 	uc.unsolicited = make(chan message)
 	uc.wpaEvents = make(chan WPAEvent)
+	uc.readLoopCloseChan = make(chan bool)
+	uc.unsolicitedCloseChan = make(chan bool)
 
 	go uc.readLoop()
 	go uc.readUnsolicited()
@@ -111,32 +118,55 @@ func Unixgram(ifName string) (Conn, error) {
 // readLoop is spawned after we connect.  It receives messages from the
 // socket, and routes them to the appropriate channel based on whether they
 // are solicited (in response to a request) or unsolicited.
-func (uc *unixgramConn) readLoop() {
+func (uc *unixgramConn) readLoop() error {
 	for {
-		// The syscall below will block until a datagram is received.
-		// It uses a zero-length buffer to look at the datagram
+		// The syscall below uses a zero-length buffer to look at the datagram
 		// without discarding it (MSG_PEEK), returning the actual
-		// datagram size (MSG_TRUNC).  See the recvfrom(2) man page.
+		// datagram size (MSG_TRUNC). MSG_DONTWAIT makes sure it doesn't block forever.
+		// See the recvfrom(2) man page.
 		//
 		// The actual read occurs using UnixConn.Read(), once we've
 		// allocated an appropriately-sized buffer.
-		n, _, err := syscall.Recvfrom(int(uc.fd), []byte{}, syscall.MSG_PEEK|syscall.MSG_TRUNC)
+		n, _, err := syscall.Recvfrom(int(uc.fd), []byte{}, syscall.MSG_PEEK|syscall.MSG_TRUNC|syscall.MSG_DONTWAIT)
 		if err != nil {
+			// If it returned to avoid block check if it should continue or exit
+			if err == syscall.EWOULDBLOCK {
+				time.Sleep(1 * time.Second)
+				select {
+				case <-uc.readLoopCloseChan:
+					return nil
+				default:
+					continue
+				}
+			}
 			// Treat read errors as a response to whatever command
 			// was last issued.
-			uc.solicited <- message{
+			select {
+			case uc.solicited <- message{
 				err: err,
+			}:
+				continue
+			case <-uc.readLoopCloseChan:
+				log.Info("Return")
+				return nil
+			case <-time.After(1 * time.Minute):
+				return errors.New("Timed out trying to send solicited message")
 			}
-			continue
 		}
 
 		buf := make([]byte, n)
 		_, err = uc.c.Read(buf[:])
 		if err != nil {
-			uc.solicited <- message{
+			select {
+			case uc.solicited <- message{
 				err: err,
+			}:
+				continue
+			case <-uc.readLoopCloseChan:
+				return nil
+			case <-time.After(1 * time.Minute):
+				return errors.New("Timed out trying to send solicited message")
 			}
-			continue
 		}
 
 		// Unsolicited messages are preceded by a priority
@@ -160,9 +190,15 @@ func (uc *unixgramConn) readLoop() {
 			p = 2
 		}
 
-		c <- message{
+		select {
+		case c <- message{
 			priority: p,
 			data:     buf,
+		}:
+		case <-uc.readLoopCloseChan:
+			return nil
+		case <-time.After(1 * time.Minute):
+			return errors.New("Timed out trying to send solicited message")
 		}
 	}
 }
@@ -172,39 +208,44 @@ func (uc *unixgramConn) readLoop() {
 // where the 'payload' is formatted with key=val.
 func (uc *unixgramConn) readUnsolicited() {
 	for {
-		mgs := <-uc.unsolicited
-		data := bytes.NewBuffer(mgs.data).String()
+		select {
+		case mgs := <-uc.unsolicited:
+			data := bytes.NewBuffer(mgs.data).String()
 
-		parts := strings.Split(data, " ")
-		if len(parts) == 0 {
-			continue
-		}
-
-		if strings.Index(parts[0], "CTRL-") != 0 {
-			uc.wpaEvents <- WPAEvent{
-				Event: "MESSAGE",
-				Line:  data,
+			parts := strings.Split(data, " ")
+			if len(parts) == 0 {
+				continue
 			}
-			continue
-		}
 
-		event := WPAEvent{
-			Event:     strings.TrimPrefix(parts[0], "CTRL-EVENT-"),
-			Arguments: make(map[string]string),
-			Line:      data,
-		}
-
-		for _, args := range parts[1:] {
-			if strings.Contains(args, "=") {
-				keyval := strings.Split(args, "=")
-				if len(keyval) != 2 {
-					continue
+			if strings.Index(parts[0], "CTRL-") != 0 {
+				uc.wpaEvents <- WPAEvent{
+					Event: "MESSAGE",
+					Line:  data,
 				}
-				event.Arguments[keyval[0]] = keyval[1]
+				continue
 			}
-		}
 
-		uc.wpaEvents <- event
+			event := WPAEvent{
+				Event:     strings.TrimPrefix(parts[0], "CTRL-EVENT-"),
+				Arguments: make(map[string]string),
+				Line:      data,
+			}
+
+			for _, args := range parts[1:] {
+				if strings.Contains(args, "=") {
+					keyval := strings.Split(args, "=")
+					if len(keyval) != 2 {
+						continue
+					}
+					event.Arguments[keyval[0]] = keyval[1]
+				}
+			}
+
+			uc.wpaEvents <- event
+
+		case <-uc.unsolicitedCloseChan:
+			return
+		}
 	}
 }
 
@@ -217,8 +258,12 @@ func (uc *unixgramConn) cmd(cmd string) ([]byte, error) {
 		return nil, err
 	}
 
-	msg := <-uc.solicited
-	return msg.data, msg.err
+	select {
+	case msg := <-uc.solicited:
+		return msg.data, msg.err
+	case <-time.After(30 * time.Second):
+		return nil, errors.New("Timed out waiting for response")
+	}
 }
 
 // ParseError is returned when we can't parse the wpa_supplicant response.
@@ -252,19 +297,20 @@ func (uc *unixgramConn) EventQueue() chan WPAEvent {
 }
 
 func (uc *unixgramConn) Close() error {
-	if err := uc.runCommand("DETACH"); err != nil {
-		return err
+	err := uc.runCommand("DETACH")
+	err = uc.file.Close()
+	err = uc.c.Close()
+	select {
+	case uc.unsolicitedCloseChan <- true:
+	case <-time.After(10 * time.Second):
+		err = errors.New("Could not send close to unsolicited")
 	}
-
-	if err := uc.file.Close(); err != nil {
-		return err
+	select {
+	case uc.readLoopCloseChan <- true:
+	case <-time.After(10 * time.Second):
+		err = errors.New("Could not send close to read loop")
 	}
-
-	if err := uc.c.Close(); err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (uc *unixgramConn) Ping() error {
