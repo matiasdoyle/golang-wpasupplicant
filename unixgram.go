@@ -111,11 +111,11 @@ func Unixgram(ifName string, readUnsolicited bool) (Conn, error) {
 	go uc.readLoop()
 	if readUnsolicited {
 		go uc.readUnsolicited(uc.unsolicitedCloseChan)
-	}
-	// Issue an ATTACH command to start receiving unsolicited events.
-	err = uc.runCommand("ATTACH")
-	if err != nil {
-		return nil, err
+		// Issue an ATTACH command to start receiving unsolicited events.
+		err = uc.runCommand("ATTACH")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return uc, nil
@@ -313,8 +313,10 @@ func (uc *unixgramConn) EventQueue() chan WPAEvent {
 }
 
 func (uc *unixgramConn) Close() error {
-	if err := uc.runCommand("DETACH"); err != nil {
-		log.WithError(err).Error("Error closing uc uc.runCommand DETACH")
+	if uc.readUnsol {
+		if err := uc.runCommand("DETACH"); err != nil {
+			log.WithError(err).Error("Error closing uc uc.runCommand DETACH")
+		}
 	}
 
 	if err := uc.file.Close(); err != nil {
