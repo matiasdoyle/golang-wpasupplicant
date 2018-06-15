@@ -143,7 +143,6 @@ func (uc *unixgramConn) readLoop() error {
 				time.Sleep(1 * time.Second)
 				select {
 				case <-uc.readLoopCloseChan:
-					log.Info("Return")
 					return nil
 				default:
 					continue
@@ -156,7 +155,6 @@ func (uc *unixgramConn) readLoop() error {
 			}:
 				continue
 			case <-uc.readLoopCloseChan:
-				log.Info("Return")
 				return nil
 			}
 		}
@@ -170,7 +168,6 @@ func (uc *unixgramConn) readLoop() error {
 			}:
 				continue
 			case <-uc.readLoopCloseChan:
-				log.Info("Return")
 				return nil
 			}
 		}
@@ -205,7 +202,6 @@ func (uc *unixgramConn) readLoop() error {
 			data:     buf,
 		}:
 		case <-uc.readLoopCloseChan:
-			log.Info("Return")
 			return nil
 		}
 	}
@@ -260,6 +256,7 @@ func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
 			}
 
 		case <-closeChan:
+			close(uc.wpaEvents)
 			return
 		}
 	}
@@ -326,6 +323,7 @@ func (uc *unixgramConn) Close() error {
 	if err := uc.c.Close(); err != nil {
 		log.WithError(err).Error("Error closing uc uc.c.Close()")
 	}
+
 	go uc.stopGoroutines()
 	return nil
 }
