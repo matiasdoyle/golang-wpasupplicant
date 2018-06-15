@@ -407,6 +407,9 @@ func (uc *unixgramConn) GetNetwork(networkID int, variable string) (string, erro
 	if err != nil {
 		return "ERROR", err
 	}
+	if string(resp) == "FAIL\n" {
+		return "FAIL", errors.New("Failed")
+	}
 	n := len(resp)
 	s := string(resp[:n])
 	return s, nil
