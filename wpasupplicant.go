@@ -146,21 +146,30 @@ type StatusResult interface {
 	IPAddr() string
 	SSID() string
 	Address() string
+	Bssid() string
+	Frequency() string
+	IdStr() string
 }
 
 type statusResult struct {
-	wpaState string
-	keyMgmt  string
-	ipAddr   string
-	ssid     string
-	address  string
+	wpaState  string
+	keyMgmt   string
+	ipAddr    string
+	ssid      string
+	address   string
+	bssid     string
+	frequency string
+	idStr     string
 }
 
-func (s *statusResult) WPAState() string { return s.wpaState }
-func (s *statusResult) KeyMgmt() string  { return s.keyMgmt }
-func (s *statusResult) IPAddr() string   { return s.ipAddr }
-func (s *statusResult) SSID() string     { return s.ssid }
-func (s *statusResult) Address() string  { return s.address }
+func (s *statusResult) WPAState() string  { return s.wpaState }
+func (s *statusResult) KeyMgmt() string   { return s.keyMgmt }
+func (s *statusResult) IPAddr() string    { return s.ipAddr }
+func (s *statusResult) SSID() string      { return s.ssid }
+func (s *statusResult) Address() string   { return s.address }
+func (s *statusResult) Bssid() string     { return s.bssid }
+func (s *statusResult) Frequency() string { return s.frequency }
+func (s *statusResult) IdStr() string     { return s.idStr }
 
 type WPAEvent struct {
 	Event     string

@@ -65,7 +65,6 @@ type unixgramConn struct {
 	solicited, unsolicited                  chan message
 	wpaEvents                               chan WPAEvent
 	unsolicitedCloseChan, readLoopCloseChan chan bool
-	readUnsol                               bool
 }
 
 // socketPath is where to find the the AF_UNIX sockets for each interface.  It
@@ -74,7 +73,7 @@ var socketPath = "/run/wpa_supplicant"
 
 // Unixgram returns a connection to wpa_supplicant for the specified
 // interface, using the socket-based control interface.
-func Unixgram(ifName string, readUnsolicited bool) (Conn, error) {
+func Unixgram(ifName string) (Conn, error) {
 	var err error
 	uc := &unixgramConn{}
 
@@ -98,7 +97,6 @@ func Unixgram(ifName string, readUnsolicited bool) (Conn, error) {
 
 	// This specifies whether we are listening to WPA events or not.
 	// If we don't, this would block if they were sent.
-	uc.readUnsol = readUnsolicited
 	uc.file = file
 	uc.fd = file.Fd()
 
@@ -109,13 +107,11 @@ func Unixgram(ifName string, readUnsolicited bool) (Conn, error) {
 	uc.unsolicitedCloseChan = make(chan bool)
 
 	go uc.readLoop()
-	if readUnsolicited {
-		go uc.readUnsolicited(uc.unsolicitedCloseChan)
-		// Issue an ATTACH command to start receiving unsolicited events.
-		err = uc.runCommand("ATTACH")
-		if err != nil {
-			return nil, err
-		}
+	go uc.readUnsolicited(uc.unsolicitedCloseChan)
+	// Issue an ATTACH command to start receiving unsolicited events.
+	err = uc.runCommand("ATTACH")
+	if err != nil {
+		return nil, err
 	}
 
 	return uc, nil
@@ -181,9 +177,6 @@ func (uc *unixgramConn) readLoop() error {
 		if len(buf) >= 3 && buf[0] == '<' && buf[2] == '>' {
 			switch buf[1] {
 			case '0', '1', '2', '3', '4':
-				if !uc.readUnsol {
-					continue
-				}
 				c = uc.unsolicited
 				p, _ = strconv.Atoi(string(buf[1]))
 				buf = buf[3:]
@@ -310,10 +303,8 @@ func (uc *unixgramConn) EventQueue() chan WPAEvent {
 }
 
 func (uc *unixgramConn) Close() error {
-	if uc.readUnsol {
-		if err := uc.runCommand("DETACH"); err != nil {
-			log.WithError(err).Error("Error closing uc uc.runCommand DETACH")
-		}
+	if err := uc.runCommand("DETACH"); err != nil {
+		log.WithError(err).Error("Error closing uc uc.runCommand DETACH")
 	}
 
 	if err := uc.file.Close(); err != nil {
@@ -329,12 +320,10 @@ func (uc *unixgramConn) Close() error {
 }
 
 func (uc *unixgramConn) stopGoroutines() {
-	if uc.readUnsol {
-		select {
-		case uc.unsolicitedCloseChan <- true:
-		case <-time.After(20 * time.Second):
-			log.Error("Could not send close to unsolicited")
-		}
+	select {
+	case uc.unsolicitedCloseChan <- true:
+	case <-time.After(20 * time.Second):
+		log.Error("Could not send close to unsolicited")
 	}
 	select {
 	case uc.readLoopCloseChan <- true:
@@ -562,6 +551,12 @@ func parseStatusResults(resp io.Reader) (StatusResult, error) {
 			res.ssid = fields[1]
 		case "address":
 			res.address = fields[1]
+		case "bssid":
+			res.bssid = fields[1]
+		case "freq":
+			res.frequency = fields[1]
+		case "id_str":
+			res.idStr = fields[1]
 		}
 	}
 
