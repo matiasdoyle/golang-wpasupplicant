@@ -214,6 +214,7 @@ func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
 				continue
 			}
 
+			log.Infof("message: %+v", parts)
 			if strings.Index(parts[0], "CTRL-") != 0 {
 				select {
 				case uc.wpaEvents <- WPAEvent{
@@ -227,9 +228,13 @@ func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
 			}
 
 			event := WPAEvent{
-				Event:     strings.TrimPrefix(parts[0], "CTRL-EVENT-"),
 				Arguments: make(map[string]string),
 				Line:      data,
+			}
+			if len(parts) >= 6 && parts[5] == "reason=WRONG_KEY" {
+				event.Event = "BAD_PASSPHRASE"
+			} else {
+				event.Event = strings.TrimPrefix(parts[0], "CTRL-EVENT-")
 			}
 
 			for _, args := range parts[1:] {
