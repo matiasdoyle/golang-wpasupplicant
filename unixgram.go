@@ -214,7 +214,6 @@ func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
 				continue
 			}
 
-			log.Infof("message: %+v", parts)
 			if strings.Index(parts[0], "CTRL-") != 0 {
 				select {
 				case uc.wpaEvents <- WPAEvent{
