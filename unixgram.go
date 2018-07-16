@@ -231,7 +231,7 @@ func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
 				Line:      data,
 			}
 			if len(parts) >= 6 && parts[5] == "reason=WRONG_KEY" {
-				event.Event = "BAD_PASSPHRASE"
+				event.Event = "BAD-PASSPHRASE"
 			} else {
 				event.Event = strings.TrimPrefix(parts[0], "CTRL-EVENT-")
 			}
@@ -637,7 +637,7 @@ func parseScanResults(resp io.Reader) (res []ScanResult, errs []error) {
 
 		var ssid string
 		if ssidCol != -1 {
-			ssid = fields[ssidCol]
+			ssid = string(fields[ssidCol])
 		}
 
 		res = append(res, &scanResult{
