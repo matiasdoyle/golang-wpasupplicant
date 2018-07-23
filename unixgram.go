@@ -31,6 +31,7 @@ package wpasupplicant
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -403,9 +404,13 @@ func (uc *unixgramConn) GetNetwork(networkID int, variable string) (string, erro
 	if string(resp) == "FAIL\n" {
 		return "FAIL", errors.New("Failed")
 	}
-	n := len(resp)
-	s := string(resp[:n])
-	return s, nil
+	if variable == "ssid" {
+		return decodeByteLiteralString(string(resp)), nil
+	} else {
+		n := len(resp)
+		s := string(resp[:n])
+		return s, nil
+	}
 }
 
 func (uc *unixgramConn) SaveConfig() error {
@@ -637,7 +642,8 @@ func parseScanResults(resp io.Reader) (res []ScanResult, errs []error) {
 
 		var ssid string
 		if ssidCol != -1 {
-			ssid = string(fields[ssidCol])
+			ssid = decodeByteLiteralString(fields[ssidCol])
+			log.Infof("Ssid: %s", ssid)
 		}
 
 		res = append(res, &scanResult{
@@ -650,4 +656,26 @@ func parseScanResults(resp io.Reader) (res []ScanResult, errs []error) {
 	}
 
 	return
+}
+
+func decodeByteLiteralString(input string) string {
+	result := []byte{}
+	//TODO: check \x + two bytes after and not \ before
+	// Irf\xc3\xa6\\xoenf
+	// Irfæ\nf
+	length := len(input)
+	for idx := 0; idx < length; {
+		if idx < length-2 && string(input[idx:idx+2]) == string("\\\\") {
+			result = append(result, input[idx:idx+1]...)
+			idx += 2
+		} else if idx < length+3 && string(input[idx]) == string("\\") && string(input[idx+1]) == "x" {
+			byts, _ := hex.DecodeString(input[idx+2 : idx+4])
+			result = append(result, byts...)
+			idx += 4
+		} else {
+			result = append(result, input[idx])
+			idx += 1
+		}
+	}
+	return string(result)
 }
