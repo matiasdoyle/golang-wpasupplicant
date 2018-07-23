@@ -643,7 +643,6 @@ func parseScanResults(resp io.Reader) (res []ScanResult, errs []error) {
 		var ssid string
 		if ssidCol != -1 {
 			ssid = decodeByteLiteralString(fields[ssidCol])
-			log.Infof("Ssid: %s", ssid)
 		}
 
 		res = append(res, &scanResult{
@@ -660,9 +659,6 @@ func parseScanResults(resp io.Reader) (res []ScanResult, errs []error) {
 
 func decodeByteLiteralString(input string) string {
 	result := []byte{}
-	//TODO: check \x + two bytes after and not \ before
-	// Irf\xc3\xa6\\xoenf
-	// Irfæ\nf
 	length := len(input)
 	for idx := 0; idx < length; {
 		if idx < length-2 && string(input[idx:idx+2]) == string("\\\\") {
