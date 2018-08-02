@@ -108,7 +108,7 @@ func Unixgram(ifName string) (Conn, error) {
 	uc.unsolicitedCloseChan = make(chan bool)
 
 	go uc.readLoop()
-	go uc.readUnsolicited(uc.unsolicitedCloseChan)
+	go uc.readUnsolicited()
 	// Issue an ATTACH command to start receiving unsolicited events.
 	err = uc.runCommand("ATTACH")
 	if err != nil {
@@ -145,7 +145,6 @@ func (uc *unixgramConn) readLoop() error {
 					continue
 				}
 			}
-			log.Infof("Error in recvFrom: %+v", err)
 			select {
 			case uc.solicited <- message{
 				err: err,
@@ -204,7 +203,7 @@ func (uc *unixgramConn) readLoop() error {
 // readUnsolicited handles messages sent to the unsolicited channel and parse them
 // into a WPAEvent. At the moment we only handle `CTRL-EVENT-*` events and only events
 // where the 'payload' is formatted with key=val.
-func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
+func (uc *unixgramConn) readUnsolicited() {
 	for {
 		select {
 		case mgs := <-uc.unsolicited:
@@ -252,8 +251,7 @@ func (uc *unixgramConn) readUnsolicited(closeChan <-chan bool) {
 			case <-uc.unsolicitedCloseChan:
 				return
 			}
-
-		case <-closeChan:
+		case <-uc.unsolicitedCloseChan:
 			close(uc.wpaEvents)
 			return
 		}
@@ -311,6 +309,7 @@ func (uc *unixgramConn) Close() error {
 	if err := uc.runCommand("DETACH"); err != nil {
 		log.WithError(err).Error("Error closing uc uc.runCommand DETACH")
 	}
+	go uc.stopGoroutines()
 
 	if err := uc.file.Close(); err != nil {
 		log.WithError(err).Error("Error closing uc uc.file.Close()")
@@ -319,8 +318,6 @@ func (uc *unixgramConn) Close() error {
 	if err := uc.c.Close(); err != nil {
 		log.WithError(err).Error("Error closing uc uc.c.Close()")
 	}
-
-	go uc.stopGoroutines()
 	return nil
 }
 
