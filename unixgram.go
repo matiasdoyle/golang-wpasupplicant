@@ -508,7 +508,7 @@ func parseListNetworksResult(resp io.Reader) (res []ConfiguredNetwork, err error
 
 		var ssid string
 		if ssidCol != -1 {
-			ssid = fields[ssidCol]
+			ssid = decodeByteLiteralString(fields[ssidCol])
 		}
 
 		var bssid string
@@ -659,7 +659,7 @@ func decodeByteLiteralString(input string) string {
 	length := len(input)
 	for idx := 0; idx < length; {
 		if idx < length-2 && string(input[idx:idx+2]) == string("\\\\") {
-			result = append(result, input[idx:idx+1]...)
+			result = append(result, input[idx:idx+2]...)
 			idx += 2
 		} else if idx < length+3 && string(input[idx]) == string("\\") && string(input[idx+1]) == "x" {
 			byts, _ := hex.DecodeString(input[idx+2 : idx+4])
