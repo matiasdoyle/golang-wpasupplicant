@@ -554,7 +554,7 @@ func parseStatusResults(resp io.Reader) (StatusResult, error) {
 		case "ip_address":
 			res.ipAddr = fields[1]
 		case "ssid":
-			res.ssid = fields[1]
+			res.ssid = decodeByteLiteralString(fields[1])
 		case "address":
 			res.address = fields[1]
 		case "bssid":
