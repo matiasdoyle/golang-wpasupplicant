@@ -63,6 +63,7 @@ type unixgramConn struct {
 	c                                       *net.UnixConn
 	fd                                      uintptr
 	file                                    *os.File
+	filename                                string
 	solicited, unsolicited                  chan message
 	wpaEvents                               chan WPAEvent
 	unsolicitedCloseChan, readLoopCloseChan chan bool
@@ -82,7 +83,8 @@ func Unixgram(ifName string) (Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	os.Remove(local.Name())
+	uc.filename = local.Name()
+	os.Remove(uc.filename)
 
 	uc.c, err = net.DialUnix("unixgram",
 		&net.UnixAddr{Name: local.Name(), Net: "unixgram"},
@@ -93,6 +95,7 @@ func Unixgram(ifName string) (Conn, error) {
 
 	file, err := uc.c.File()
 	if err != nil {
+		uc.cleanUp()
 		return nil, err
 	}
 
@@ -112,6 +115,7 @@ func Unixgram(ifName string) (Conn, error) {
 	// Issue an ATTACH command to start receiving unsolicited events.
 	err = uc.runCommand("ATTACH")
 	if err != nil {
+		uc.cleanUp()
 		return nil, err
 	}
 
@@ -311,6 +315,11 @@ func (uc *unixgramConn) Close() error {
 	}
 	go uc.stopGoroutines()
 
+	uc.cleanUp()
+	return nil
+}
+
+func (uc unixgramConn) cleanUp() {
 	if err := uc.file.Close(); err != nil {
 		log.WithError(err).Error("Error closing uc uc.file.Close()")
 	}
@@ -318,7 +327,10 @@ func (uc *unixgramConn) Close() error {
 	if err := uc.c.Close(); err != nil {
 		log.WithError(err).Error("Error closing uc uc.c.Close()")
 	}
-	return nil
+
+	if err := os.Remove(uc.filename); err != nil {
+		log.WithError(err).Errorf("Error removing file: %s", uc.filename)
+	}
 }
 
 func (uc *unixgramConn) stopGoroutines() {
