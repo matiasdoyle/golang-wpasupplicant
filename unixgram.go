@@ -208,6 +208,7 @@ func (uc *unixgramConn) readLoop() error {
 // into a WPAEvent. At the moment we only handle `CTRL-EVENT-*` events and only events
 // where the 'payload' is formatted with key=val.
 func (uc *unixgramConn) readUnsolicited() {
+	defer close(uc.wpaEvents)
 	for {
 		select {
 		case mgs := <-uc.unsolicited:
@@ -256,7 +257,6 @@ func (uc *unixgramConn) readUnsolicited() {
 				return
 			}
 		case <-uc.unsolicitedCloseChan:
-			close(uc.wpaEvents)
 			return
 		}
 	}
