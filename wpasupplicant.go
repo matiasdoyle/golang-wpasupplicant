@@ -180,9 +180,6 @@ type WPAEvent struct {
 // Conn is a connection to wpa_supplicant over one of its communication
 // channels.
 type Conn interface {
-	// Close closes the unixgram connection
-	Close() error
-
 	// Ping tests the connection.  It returns nil if wpa_supplicant is
 	// responding.
 	Ping() error

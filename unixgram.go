@@ -31,6 +31,7 @@ package wpasupplicant
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -60,13 +61,13 @@ type message struct {
 //
 // See https://w1.fi/wpa_supplicant/devel/ctrl_iface_page.html.
 type unixgramConn struct {
-	c                                       *net.UnixConn
-	fd                                      uintptr
-	file                                    *os.File
-	filename                                string
-	solicited, unsolicited                  chan message
-	wpaEvents                               chan WPAEvent
-	unsolicitedCloseChan, readLoopCloseChan chan bool
+	c                      *net.UnixConn
+	fd                     uintptr
+	file                   *os.File
+	filename               string
+	solicited, unsolicited chan message
+	wpaEvents              chan WPAEvent
+	ctx                    context.Context
 }
 
 // socketPath is where to find the the AF_UNIX sockets for each interface.  It
@@ -75,9 +76,11 @@ var socketPath = "/run/wpa_supplicant"
 
 // Unixgram returns a connection to wpa_supplicant for the specified
 // interface, using the socket-based control interface.
-func Unixgram(ifName string) (Conn, error) {
+func Unixgram(ctx context.Context, ifName string) (Conn, error) {
 	var err error
-	uc := &unixgramConn{}
+	uc := &unixgramConn{
+		ctx: ctx,
+	}
 
 	local, err := ioutil.TempFile("/tmp", "wpa_supplicant")
 	if err != nil {
@@ -107,8 +110,6 @@ func Unixgram(ifName string) (Conn, error) {
 	uc.solicited = make(chan message)
 	uc.unsolicited = make(chan message)
 	uc.wpaEvents = make(chan WPAEvent)
-	uc.readLoopCloseChan = make(chan bool)
-	uc.unsolicitedCloseChan = make(chan bool)
 
 	go uc.readLoop()
 	go uc.readUnsolicited()
@@ -118,6 +119,11 @@ func Unixgram(ifName string) (Conn, error) {
 		uc.cleanUp()
 		return nil, err
 	}
+
+	go func() {
+		<-ctx.Done()
+		uc.close()
+	}()
 
 	return uc, nil
 }
@@ -143,7 +149,7 @@ func (uc *unixgramConn) readLoop() error {
 			if err == syscall.EWOULDBLOCK {
 				time.Sleep(1 * time.Second)
 				select {
-				case <-uc.readLoopCloseChan:
+				case <-uc.ctx.Done():
 					return nil
 				default:
 					continue
@@ -154,7 +160,7 @@ func (uc *unixgramConn) readLoop() error {
 				err: err,
 			}:
 				continue
-			case <-uc.readLoopCloseChan:
+			case <-uc.ctx.Done():
 				return nil
 			}
 		}
@@ -167,7 +173,7 @@ func (uc *unixgramConn) readLoop() error {
 				err: err,
 			}:
 				continue
-			case <-uc.readLoopCloseChan:
+			case <-uc.ctx.Done():
 				return nil
 			}
 		}
@@ -198,7 +204,7 @@ func (uc *unixgramConn) readLoop() error {
 			priority: p,
 			data:     buf,
 		}:
-		case <-uc.readLoopCloseChan:
+		case <-uc.ctx.Done():
 			return nil
 		}
 	}
@@ -226,7 +232,7 @@ func (uc *unixgramConn) readUnsolicited() {
 					Line:  data,
 				}:
 					continue
-				case <-uc.unsolicitedCloseChan:
+				case <-uc.ctx.Done():
 					return
 				}
 			}
@@ -253,10 +259,10 @@ func (uc *unixgramConn) readUnsolicited() {
 
 			select {
 			case uc.wpaEvents <- event:
-			case <-uc.unsolicitedCloseChan:
+			case <-uc.ctx.Done():
 				return
 			}
-		case <-uc.unsolicitedCloseChan:
+		case <-uc.ctx.Done():
 			return
 		}
 	}
@@ -276,6 +282,8 @@ func (uc *unixgramConn) cmd(cmd string) ([]byte, error) {
 		return msg.data, msg.err
 	case <-time.After(30 * time.Second):
 		return nil, errors.New("Timed out waiting for response")
+	case <-uc.ctx.Done():
+		return nil, errors.New("Context cancelled")
 	}
 }
 
@@ -309,12 +317,8 @@ func (uc *unixgramConn) EventQueue() chan WPAEvent {
 	return uc.wpaEvents
 }
 
-func (uc *unixgramConn) Close() error {
-	if err := uc.runCommand("DETACH"); err != nil {
-		log.WithError(err).Error("Error closing uc uc.runCommand DETACH")
-	}
-	go uc.stopGoroutines()
-
+func (uc *unixgramConn) close() error {
+	uc.runCommand("DETACH")
 	uc.cleanUp()
 	return nil
 }
@@ -330,19 +334,6 @@ func (uc unixgramConn) cleanUp() {
 
 	if err := os.Remove(uc.filename); err != nil {
 		log.WithError(err).Errorf("Error removing file: %s", uc.filename)
-	}
-}
-
-func (uc *unixgramConn) stopGoroutines() {
-	select {
-	case uc.unsolicitedCloseChan <- true:
-	case <-time.After(20 * time.Second):
-		log.Error("Could not send close to unsolicited")
-	}
-	select {
-	case uc.readLoopCloseChan <- true:
-	case <-time.After(20 * time.Second):
-		log.Error("Could not send close to read loop")
 	}
 }
 
@@ -679,7 +670,7 @@ func decodeByteLiteralString(input string) string {
 			idx += 4
 		} else {
 			result = append(result, input[idx])
-			idx += 1
+			idx++
 		}
 	}
 	return string(result)
