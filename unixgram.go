@@ -253,7 +253,7 @@ func (uc *unixgramConn) readUnsolicited() {
 					if len(keyval) != 2 {
 						continue
 					}
-					event.Arguments[strings.TrimPrefix(keyval[0], "[")] = strings.TrimPrefix(keyval[1], "]")
+					event.Arguments[strings.TrimPrefix(keyval[0], "[")] = strings.TrimSuffix(keyval[1], "]")
 				}
 			}
 
