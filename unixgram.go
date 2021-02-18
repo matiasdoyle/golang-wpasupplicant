@@ -387,7 +387,8 @@ func (uc *unixgramConn) SetNetwork(networkID int, variable string, value string)
 	var cmd string
 
 	// Since key_mgmt and priority expects the value to not be wrapped in "" we do a little check here.
-	if variable == "key_mgmt" || variable == "priority" || variable == "eap" || variable == "scan_ssid" || variable == "wep_tx_keyidx" || variable == "wep_key0" {
+	if variable == "key_mgmt" || variable == "priority" || variable == "eap" || variable == "scan_ssid" ||
+		variable == "wep_tx_keyidx" || variable == "wep_key0" || variable == "bssid" || variable == "freq_list" {
 		cmd = fmt.Sprintf("SET_NETWORK %d %s %s", networkID, variable, value)
 	} else {
 		cmd = fmt.Sprintf("SET_NETWORK %d %s \"%s\"", networkID, variable, value)
